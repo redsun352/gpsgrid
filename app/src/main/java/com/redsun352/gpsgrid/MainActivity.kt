@@ -12,14 +12,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -45,7 +43,9 @@ class MainActivity : ComponentActivity() {
     private var onLocationResult: ((android.location.Location) -> Unit)? = null
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
-        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true) readLocation { location -> onLocationResult?.invoke(location) }
+        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
+            readLocation { location -> onLocationResult?.invoke(location) }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -67,35 +67,60 @@ class MainActivity : ComponentActivity() {
                 if (!location.hasAccuracy() || location.accuracy > 5f) {
                     status = "Konum doğruluğu yetersiz: %.1f m (≤ 5 m gerekli)".format(location.accuracy)
                 } else {
-                    val p = SurveyPoint(points.size + 1, location.latitude, location.longitude, if (location.hasAltitude()) location.altitude else 0.0, location.accuracy, System.currentTimeMillis())
+                    val p = SurveyPoint(
+                        points.size + 1,
+                        location.latitude,
+                        location.longitude,
+                        if (location.hasAltitude()) location.altitude else 0.0,
+                        location.accuracy,
+                        System.currentTimeMillis()
+                    )
                     points = points + p
                     status = "P${p.id} kaydedildi — %.1f m".format(p.accuracy)
                 }
             }
-            if (hasLocationPermission()) readLocation { location -> onLocationResult?.invoke(location) }
-            else permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            if (hasLocationPermission()) {
+                readLocation { location -> onLocationResult?.invoke(location) }
+            } else {
+                permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            }
         }
 
         val area = if (closed) polygonAreaM2(points) else 0.0
         val perimeter = polygonPerimeterM(points, closed)
 
-        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             Text("GPS Grid", style = MaterialTheme.typography.headlineMedium)
             Text(status)
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Accuracy: ${accuracy?.let { "%.1f m".format(it) } ?: "—"}")
                 Text("Nokta: ${points.size}")
             }
+
             SurveyCanvas(points, closed, Modifier.fillMaxWidth().height(260.dp))
+
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(Modifier.weight(1f), enabled = !closed, onClick = { requestPoint() }) { Text("NOKTA EKLE") }
-                Button(Modifier.weight(1f), enabled = !closed && points.size >= 3, onClick = {
-                    closed = true
-                    status = "Polygon kapatıldı"
-                }) { Text("POLİGONU KAPAT") }
+                Button(
+                    onClick = { requestPoint() },
+                    modifier = Modifier.weight(1f),
+                    enabled = !closed
+                ) { Text("NOKTA EKLE") }
+
+                Button(
+                    onClick = {
+                        closed = true
+                        status = "Polygon kapatıldı"
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = !closed && points.size >= 3
+                ) { Text("POLİGONU KAPAT") }
             }
+
             if (closed) {
-                Card(Modifier.fillMaxWidth()) {
+                Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("POLYGON HAZIR", style = MaterialTheme.typography.titleMedium)
                         Text("Alan: ${formatArea(area)}")
@@ -103,20 +128,35 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+
             Text("Saha noktaları", style = MaterialTheme.typography.titleMedium)
             LazyColumn(Modifier.weight(1f)) {
-                itemsIndexed(points) { _, p -> Text("P${p.id}  ${"%.7f".format(p.latitude)}, ${"%.7f".format(p.longitude)}  ±${"%.1f m".format(p.accuracy)}") }
+                items(points, key = { it.id }) { p ->
+                    Text("P${p.id}  ${"%.7f".format(p.latitude)}, ${"%.7f".format(p.longitude)}  ±${"%.1f m".format(p.accuracy)}")
+                }
             }
-            OutlinedButton(Modifier.fillMaxWidth(), enabled = points.isNotEmpty() && !closed, onClick = {
-                points = points.dropLast(1)
-                status = "Son nokta silindi"
-            }) { Text("SON NOKTAYI SİL") }
+
+            OutlinedButton(
+                onClick = {
+                    points = points.dropLast(1)
+                    status = "Son nokta silindi"
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = points.isNotEmpty() && !closed
+            ) { Text("SON NOKTAYI SİL") }
         }
     }
 
     @Composable
     private fun SurveyCanvas(points: List<SurveyPoint>, closed: Boolean, modifier: Modifier) {
-        Box(modifier.background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+        val surfaceColor = MaterialTheme.colorScheme.surfaceVariant
+        val primaryColor = MaterialTheme.colorScheme.primary
+        val pointColor = MaterialTheme.colorScheme.error
+
+        Box(
+            modifier = modifier.background(surfaceColor),
+            contentAlignment = Alignment.Center
+        ) {
             if (points.isEmpty()) {
                 Text("Noktalar burada görünecek")
             } else {
@@ -132,15 +172,18 @@ class MainActivity : ComponentActivity() {
                     val cy = size.height / 2f
                     val centerLon = (minLon + maxLon) / 2.0
                     val centerLat = (minLat + maxLat) / 2.0
-                    fun pos(p: SurveyPoint) = Offset(cx + ((p.longitude - centerLon) * scale).toFloat(), cy - ((p.latitude - centerLat) * scale).toFloat())
+                    fun pos(p: SurveyPoint) = Offset(
+                        cx + ((p.longitude - centerLon) * scale).toFloat(),
+                        cy - ((p.latitude - centerLat) * scale).toFloat()
+                    )
                     val path = Path()
                     points.forEachIndexed { i, p ->
                         val o = pos(p)
                         if (i == 0) path.moveTo(o.x, o.y) else path.lineTo(o.x, o.y)
                     }
                     if (closed) path.close()
-                    drawPath(path, color = MaterialTheme.colorScheme.primary, style = Stroke(width = 5f))
-                    points.forEach { drawCircle(MaterialTheme.colorScheme.error, 9f, pos(it)) }
+                    drawPath(path, color = primaryColor, style = Stroke(width = 5f))
+                    points.forEach { drawCircle(pointColor, 9f, pos(it)) }
                 }
             }
         }
@@ -150,9 +193,8 @@ class MainActivity : ComponentActivity() {
 
     private fun readLocation(callback: (android.location.Location) -> Unit) {
         if (!hasLocationPermission()) return
-        fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, CancellationTokenSource().token).addOnSuccessListener { location ->
-            if (location != null) callback(location)
-        }
+        fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, CancellationTokenSource().token)
+            .addOnSuccessListener { location -> if (location != null) callback(location) }
     }
 
     private fun polygonAreaM2(points: List<SurveyPoint>): Double {
@@ -161,7 +203,10 @@ class MainActivity : ComponentActivity() {
         val r = 6371008.8
         val xy = points.map { Pair(Math.toRadians(it.longitude) * r * cos(lat0), Math.toRadians(it.latitude) * r) }
         var sum = 0.0
-        xy.indices.forEach { i -> val j = (i + 1) % xy.size; sum += xy[i].first * xy[j].second - xy[j].first * xy[i].second }
+        xy.indices.forEach { i ->
+            val j = (i + 1) % xy.size
+            sum += xy[i].first * xy[j].second - xy[j].first * xy[i].second
+        }
         return abs(sum) / 2.0
     }
 
