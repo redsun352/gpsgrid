@@ -1,0 +1,9 @@
+# Copy to config.yml after creating a Cloudflare Tunnel.
+# Replace the hostname with your own DNS hostname.
+tunnel: YOUR_TUNNEL_UUID
+credentials-file: C:\\Users\\YOUR_USER\\.cloudflared\\YOUR_TUNNEL_UUID.json
+
+ingress:
+  - hostname: gpsgrid.example.com
+    service: http://127.0.0.1:8765
+  - service: http_status:404
