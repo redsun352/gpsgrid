@@ -22,24 +22,27 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
 
       - name: Install Android SDK 36
-        run: yes | sdkmanager --licenses >/dev/null 2>&1 || true
-
-      - name: Install required Android packages
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Verify Java and Android environment
+      - name: Install Gradle 8.11.1
+        run: |
+          curl -fsSL https://services.gradle.org/distributions/gradle-8.11.1-bin.zip -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-8.11.1/bin" >> "$GITHUB_PATH"
+
+      - name: Verify build environment
         run: |
           java -version
+          gradle --version
           echo "JAVA_HOME=$JAVA_HOME"
           echo "ANDROID_HOME=$ANDROID_HOME"
 
       - name: Build debug APK
-        run: |
-          chmod +x gradlew
-          ./gradlew --version
-          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: Verify APK
         run: |
