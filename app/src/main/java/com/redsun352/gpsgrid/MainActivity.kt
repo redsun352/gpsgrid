@@ -33,7 +33,7 @@ class MainActivity:ComponentActivity(){
  private val permissionLauncher=registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()){if(it[Manifest.permission.ACCESS_FINE_LOCATION]==true)readLocation{sampleCallback?.invoke(it)}}
  override fun onCreate(b:Bundle?){super.onCreate(b);setContent{MaterialTheme{GpsGrid()}}}
  private fun hasPermission()=ContextCompat.checkSelfPermission(this,Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED
- private fun readLocation(done:(Location)->Unit){if(!hasPermission())return;fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY,null).addOnSuccessListener{if(it!=null)done(it)}}
+ private fun readLocation(done:(Location)->Unit){if(!hasPermission())return;val token=CancellationTokenSource();fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY,token.token).addOnSuccessListener{if(it!=null)done(it)}}
  @Composable private fun GpsGrid(){
   var points by remember{mutableStateOf(listOf<SurveyPoint>())};var closed by remember{mutableStateOf(false)};var status by remember{mutableStateOf("GPS hazır")};var accuracy by remember{mutableStateOf<Float?>(null)};var collecting by remember{mutableStateOf(false)};var progress by remember{mutableStateOf(0)};var samples by remember{mutableStateOf(listOf<Location>())}
   fun startCapture(){if(closed||collecting)return;if(!hasPermission()){permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION));return};samples=emptyList();progress=0;collecting=true;status="GPS örnekleri toplanıyor…"}
