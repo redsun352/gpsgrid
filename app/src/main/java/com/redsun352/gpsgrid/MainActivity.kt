@@ -46,7 +46,7 @@ class MainActivity:ComponentActivity(){
  private fun applyClientHeaders(c:HttpURLConnection){c.setRequestProperty("X-GPSGrid-Client",clientId);c.setRequestProperty("X-GPSGrid-Device",deviceName)}
  private suspend fun postJson(url:String,json:String):Boolean=withContext(Dispatchers.IO){try{val c=URL(url).openConnection() as HttpURLConnection;c.requestMethod="POST";c.connectTimeout=8000;c.readTimeout=8000;c.doOutput=true;c.setRequestProperty("Content-Type","application/json");applyClientHeaders(c);c.outputStream.use{it.write(json.toByteArray())};c.responseCode in 200..299}catch(_:Exception){false}}
  private suspend fun getText(url:String):String?=withContext(Dispatchers.IO){try{val c=URL(url).openConnection() as HttpURLConnection;c.requestMethod="GET";c.connectTimeout=8000;c.readTimeout=8000;applyClientHeaders(c);if(c.responseCode in 200..299)c.inputStream.bufferedReader().use{it.readText()}else null}catch(_:Exception){null}}
- private suspend fun heartbeat(url:String):Boolean{val body=JSONObject().apply{put("device_id",clientId);put("device_name",deviceName);put("platform","Android");put("app","GPS Grid")};return postJson("${url.trimEnd('/')}/api/heartbeat",body.toString())}
+ private suspend fun heartbeat(url:String):Boolean{val body=JSONObject().apply{put("device_id",clientId);put("device_name",deviceName);put("platform","Android");put("app","GPS Grid");put("transport","Tailscale")};return postJson("${url.trimEnd('/')}/api/heartbeat",body.toString())}
  private suspend fun getOk(url:String)=getText(url)!=null
  @Composable private fun GpsGrid(){
   var points by remember{mutableStateOf(listOf<SurveyPoint>())}
@@ -56,7 +56,7 @@ class MainActivity:ComponentActivity(){
   var collecting by remember{mutableStateOf(false)}
   var progress by remember{mutableStateOf(0)}
   var samples by remember{mutableStateOf(listOf<Location>())}
-  var serverUrl by remember{mutableStateOf("https://rochester-acting-hundred-iron.trycloudflare.com")}
+  var serverUrl by remember{mutableStateOf("http://100.95.116.23:8765")}
   var connected by remember{mutableStateOf(false)}
   var testing by remember{mutableStateOf(false)}
   var clients by remember{mutableStateOf(listOf<ServerClient>())}
@@ -79,7 +79,7 @@ class MainActivity:ComponentActivity(){
       if(arr!=null){
        for(i in 0 until arr.length()){
         val o=arr.getJSONObject(i)
-        list.add(ServerClient(o.optString("device_id"),o.optString("ip"),o.optString("device_name"),o.optDouble("last_seen_seconds")))
+        list.add(ServerClient(o.optString("device_id",o.optString("id")),o.optString("ip"),o.optString("device_name",o.optString("user_agent")),o.optDouble("last_seen_seconds")))
        }
       }
       clients=list
@@ -105,7 +105,7 @@ class MainActivity:ComponentActivity(){
     accuracy=point.accuracy
     val warning=if(point.accuracy>10f)" — zayıf GPS sinyali" else ""
     status="P${point.id} kaydedildi — ±${"%.1f".format(point.accuracy)} m$warning"
-    val body=JSONObject().apply{put("id",point.id);put("latitude",point.latitude);put("longitude",point.longitude);put("altitude",point.altitude);put("accuracy",point.accuracy);put("time",point.time);put("device_id",clientId);put("device_name",deviceName)}
+    val body=JSONObject().apply{put("id",point.id);put("latitude",point.latitude);put("longitude",point.longitude);put("altitude",point.altitude);put("accuracy",point.accuracy);put("time",point.time);put("device_id",clientId);put("device_name",deviceName);put("transport","Tailscale")}
     connected=postJson("${serverUrl.trimEnd('/')}/api/point",body.toString())
     if(!connected)status+=" — PC bağlantısı yok"
    }else status="Geçerli GPS örneği alınamadı"
@@ -116,7 +116,7 @@ class MainActivity:ComponentActivity(){
   LaunchedEffect(testing){
    if(testing){
     connected=getOk("${serverUrl.trimEnd('/')}/api/state")
-    status=if(connected)"PC bağlantısı başarılı" else "PC bağlantısı başarısız"
+    status=if(connected)"PC bağlantısı başarılı — Tailscale" else "PC bağlantısı başarısız"
     testing=false
    }
   }
@@ -131,9 +131,10 @@ class MainActivity:ComponentActivity(){
   Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
    Text("GPS Grid",style=MaterialTheme.typography.headlineMedium)
    Text(status)
+   Text("Transport: Tailscale • Server: $serverUrl")
    Text("Accuracy: ${accuracy?.let{"%.1f m".format(it)}?:"—"} • Nokta: ${points.size}")
-   OutlinedTextField(value=serverUrl,onValueChange={serverUrl=it},modifier=Modifier.fillMaxWidth(),singleLine=true,label={Text("PC Server adresi")})
-   Button(onClick={if(!testing){testing=true;status="PC bağlantısı test ediliyor..."}},modifier=Modifier.fillMaxWidth(),enabled=!testing){Text(if(connected)"PC BAĞLI" else "PC BAĞLANTISINI TEST ET")}
+   OutlinedTextField(value=serverUrl,onValueChange={serverUrl=it},modifier=Modifier.fillMaxWidth(),singleLine=true,label={Text("Tailscale PC Server")})
+   Button(onClick={if(!testing){testing=true;status="Tailscale PC bağlantısı test ediliyor..."}},modifier=Modifier.fillMaxWidth(),enabled=!testing){Text(if(connected)"PC BAĞLI" else "PC BAĞLANTISINI TEST ET")}
    Card(Modifier.fillMaxWidth()){
     Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(4.dp)){
      Text("Servera bağlı cihazlar (${clients.size})",style=MaterialTheme.typography.titleMedium)
