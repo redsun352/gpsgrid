@@ -9,6 +9,7 @@
         android:allowBackup="true"
         android:label="GPS Grid"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.GPSGrid">
         <activity
             android:name=".MainActivity"
