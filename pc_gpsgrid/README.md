@@ -1,45 +1,67 @@
-# GPSGrid PC — Mobile Internet
+# GPSGrid PC — Tailscale
 
-Telefonun mobil verisi üzerinden PC'ye GPS noktası göndermek için PC tarafı HTTP sunucusudur.
+Telefonun mobil verisi üzerinden PC'deki GPSGrid sunucusuna erişmek için Tailscale kullanılır.
 
-## Önerilen bağlantı
+## Bağlantı
 
 ```text
 Android (4G/5G)
       |
       v
-Internet
+Tailscale
       |
       v
-Cloudflare Tunnel / güvenli HTTPS uç noktası
+Windows PC — 100.x.x.x:8765
       |
       v
-PC GPSGrid :8765
+GPSGrid Flask Server
 ```
 
-Yerel `192.168.x.x` adresleri yalnızca aynı LAN/Wi-Fi testleri içindir.
+PC sunucusu `0.0.0.0:8765` üzerinde dinler; bu nedenle Tailscale arayüzündeki `100.x.x.x` adresinden erişilebilir.
 
-## Sunucuyu çalıştırma
+## PC
 
 ```bash
 pip install flask
 python server.py
 ```
 
-Sunucu `0.0.0.0:8765` üzerinde dinler.
+PC'de Tailscale çalışırken:
 
-## Mobil internet
-
-PC'de Cloudflare Tunnel gibi bir HTTPS tüneli açılarak public URL elde edilir. Android uygulamasındaki **PC Server adresi** alanına bu HTTPS adresi girilir.
-
-Örnek:
-
-```text
-https://gpsgrid.example.com
+```powershell
+tailscale ip
 ```
 
-Android tarafı `/api/point` adresine HTTPS POST gönderir.
+çıktısındaki IPv4 adresi Android uygulamasının **PC Server adresi** alanına yazılır. Örnek:
+
+```text
+http://100.95.116.23:8765
+```
+
+## Android
+
+Android cihazında da Tailscale uygulaması açık ve PC ile aynı tailnet'e bağlı olmalıdır. GPSGrid APK'sı doğrudan Tailscale IPv4 adresine `/api/state`, `/api/heartbeat`, `/api/clients`, `/api/point` ve `/api/polygon/close` istekleri gönderir.
+
+## Windows Firewall
+
+İlk bağlantıda Windows Firewall TCP `8765` portuna izin vermiyorsa PowerShell'i yönetici olarak açıp:
+
+```powershell
+New-NetFirewallRule -DisplayName "GPSGrid Tailscale 8765" -Direction Inbound -Protocol TCP -LocalPort 8765 -Action Allow -Profile Any
+```
+
+kuralını oluşturun.
+
+## Test
+
+PC'de:
+
+```powershell
+curl.exe http://100.95.116.23:8765/api/state
+```
+
+JSON dönüyorsa Tailscale üzerinden server erişilebilirdir.
 
 ## Güvenlik
 
-Public endpoint'i doğrudan internete kimlik doğrulamasız açmayın. Üretim sürümünde cihaz/saha tokenı ve HTTPS zorunlu tutulmalıdır.
+Tailscale bağlantısı public internete açılmadığı için Cloudflare Tunnel gerekmez. Yine de tailnet erişimini yalnızca yetkili cihazlarla sınırlandırın.
