@@ -32,7 +32,7 @@ import org.json.JSONObject
 import kotlin.math.*
 
 data class SurveyPoint(val id:Int,val latitude:Double,val longitude:Double,val altitude:Double,val accuracy:Float,val time:Long)
-data class ServerClient(val id:String,val ip:String,val userAgent:String,val lastSeen:Double)
+data class ServerClient(val id:String,val ip:String,val deviceName:String,val lastSeen:Double)
 
 class MainActivity:ComponentActivity(){
  private val fused by lazy{LocationServices.getFusedLocationProviderClient(this)}
@@ -46,19 +46,132 @@ class MainActivity:ComponentActivity(){
  private fun applyClientHeaders(c:HttpURLConnection){c.setRequestProperty("X-GPSGrid-Client",clientId);c.setRequestProperty("X-GPSGrid-Device",deviceName)}
  private suspend fun postJson(url:String,json:String):Boolean=withContext(Dispatchers.IO){try{val c=URL(url).openConnection() as HttpURLConnection;c.requestMethod="POST";c.connectTimeout=8000;c.readTimeout=8000;c.doOutput=true;c.setRequestProperty("Content-Type","application/json");applyClientHeaders(c);c.outputStream.use{it.write(json.toByteArray())};c.responseCode in 200..299}catch(_:Exception){false}}
  private suspend fun getText(url:String):String?=withContext(Dispatchers.IO){try{val c=URL(url).openConnection() as HttpURLConnection;c.requestMethod="GET";c.connectTimeout=8000;c.readTimeout=8000;applyClientHeaders(c);if(c.responseCode in 200..299)c.inputStream.bufferedReader().use{it.readText()}else null}catch(_:Exception){null}}
- private suspend fun heartbeat(url:String):String?=postJsonText("${url.trimEnd('/')}/api/heartbeat",JSONObject().apply{put("device_id",clientId);put("device_name",deviceName);put("platform","Android");put("app","GPS Grid")}.toString())
- private suspend fun postJsonText(url:String,json:String):String?=withContext(Dispatchers.IO){try{val c=URL(url).openConnection() as HttpURLConnection;c.requestMethod="POST";c.connectTimeout=8000;c.readTimeout=8000;c.doOutput=true;c.setRequestProperty("Content-Type","application/json");applyClientHeaders(c);c.outputStream.use{it.write(json.toByteArray())};if(c.responseCode in 200..299)c.inputStream.bufferedReader().use{it.readText()}else null}catch(_:Exception){null}}
+ private suspend fun heartbeat(url:String):Boolean{val body=JSONObject().apply{put("device_id",clientId);put("device_name",deviceName);put("platform","Android");put("app","GPS Grid")};return postJson("${url.trimEnd('/')}/api/heartbeat",body.toString())}
  private suspend fun getOk(url:String)=getText(url)!=null
  @Composable private fun GpsGrid(){
-  var points by remember{mutableStateOf(listOf<SurveyPoint>())};var closed by remember{mutableStateOf(false)};var status by remember{mutableStateOf("GPS hazır")};var accuracy by remember{mutableStateOf<Float?>(null)};var collecting by remember{mutableStateOf(false)};var progress by remember{mutableStateOf(0)};var samples by remember{mutableStateOf(listOf<Location>())};var serverUrl by remember{mutableStateOf("https://rochester-acting-hundred-iron.trycloudflare.com")};var connected by remember{mutableStateOf(false)};var testing by remember{mutableStateOf(false)};var clients by remember{mutableStateOf(listOf<ServerClient>())}
-  fun startCapture(){if(closed||collecting)return;if(!hasPermission()){permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION));return};samples=emptyList();progress=0;collecting=true;status="GPS örnekleri toplanıyor..."}
-  LaunchedEffect(Unit){while(true){val hb=heartbeat(serverUrl);connected=hb!=null;val clientsText=getText("${serverUrl.trimEnd('/')}/api/clients");if(clientsText!=null)try{val root=JSONObject(clientsText);val arr=root.getJSONArray("clients");val list=mutableListOf<ServerClient>();for(i in 0 until arr.length()){val o=arr.getJSONObject(i);list.add(ServerClient(o.optString("id"),o.optString("ip"),o.optString("user_agent"),o.optDouble("last_seen_seconds")))}clients=list}catch(_:Exception){};delay(5000)}}
-  LaunchedEffect(collecting){if(!collecting)return@LaunchedEffect;sampleCallback={location->accuracy=location.accuracy;samples=samples+location};repeat(20){index->readLocation{location->sampleCallback?.invoke(location)};progress=index+1;delay(1000)};val good=samples.filter{it.hasAccuracy()}.sortedBy{it.accuracy};if(good.isNotEmpty()){val best=good.take(min(5,good.size));val point=SurveyPoint(points.size+1,best.map{it.latitude}.average(),best.map{it.longitude}.average(),best.map{if(it.hasAltitude())it.altitude else 0.0}.average(),best.map{it.accuracy.toDouble()}.average().toFloat(),System.currentTimeMillis());points=points+point;accuracy=point.accuracy;val warning=if(point.accuracy>10f)" — zayıf GPS sinyali" else "";status="P${point.id} kaydedildi — ±${"%.1f".format(point.accuracy)} m$warning";val body=JSONObject().apply{put("id",point.id);put("latitude",point.latitude);put("longitude",point.longitude);put("altitude",point.altitude);put("accuracy",point.accuracy);put("time",point.time);put("device_id",clientId);put("device_name",deviceName)};connected=postJson("${serverUrl.trimEnd('/')}/api/point",body.toString());if(!connected)status+=" — PC bağlantısı yok"}else status="Geçerli GPS örneği alınamadı";collecting=false;sampleCallback=null}
-  LaunchedEffect(testing){if(testing){connected=getOk("${serverUrl.trimEnd('/')}/api/state");status=if(connected)"PC bağlantısı başarılı" else "PC bağlantısı başarısız";testing=false}}
-  LaunchedEffect(closed){if(closed){val ok=postJson("${serverUrl.trimEnd('/')}/api/polygon/close","{}" );status=if(ok)"Polygon kapatıldı" else "Polygon kapatıldı — PC bağlantısı yok"}}
-  Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){Text("GPS Grid",style=MaterialTheme.typography.headlineMedium);Text(status);Text("Accuracy: ${accuracy?.let{"%.1f m".format(it)}?:"—"} • Nokta: ${points.size}");OutlinedTextField(value=serverUrl,onValueChange={serverUrl=it},modifier=Modifier.fillMaxWidth(),singleLine=true,label={Text("PC Server adresi")});Button(onClick={if(!testing){testing=true;status="PC bağlantısı test ediliyor..."}},modifier=Modifier.fillMaxWidth(),enabled=!testing){Text(if(connected)"PC BAĞLI" else "PC BAĞLANTISINI TEST ET")};Card(Modifier.fillMaxWidth()){Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(4.dp)){Text("Servera bağlı cihazlar (${clients.size})",style=MaterialTheme.typography.titleMedium);if(clients.isEmpty())Text("Bağlı cihaz yok") else clients.forEach{c->Text("● ${c.id} • ${c.ip} • ${"%.0f".format(c.lastSeen)} sn önce")}}};SurveyCanvas(points,closed,Modifier.fillMaxWidth().height(220.dp));if(collecting){LinearProgressIndicator(progress={progress/20f},Modifier.fillMaxWidth());Text("$progress / 20 ölçüm")};Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){Button(onClick={startCapture()},Modifier.weight(1f),enabled=!closed&&!collecting){Text("NOKTA EKLE")};Button(onClick={closed=true},Modifier.weight(1f),enabled=!closed&&points.size>=3&&!collecting){Text("POLİGONU KAPAT")}};if(closed)Card(Modifier.fillMaxWidth()){Column(Modifier.padding(12.dp)){Text("POLYGON HAZIR");Text("Alan: ${formatArea(polygonArea(points))}");Text("Çevre: ${formatDistance(polygonPerimeter(points))}")}};Text("Saha noktaları");LazyColumn(Modifier.weight(1f)){items(points){point->Text("P${point.id} %.7f, %.7f ±%.1f m".format(point.latitude,point.longitude,point.accuracy))}};OutlinedButton(onClick={points=points.dropLast(1);status="Son nokta silindi"},Modifier.fillMaxWidth(),enabled=points.isNotEmpty()&&!closed&&!collecting){Text("SON NOKTAYI SİL")}}
+  var points by remember{mutableStateOf(listOf<SurveyPoint>())}
+  var closed by remember{mutableStateOf(false)}
+  var status by remember{mutableStateOf("GPS hazır")}
+  var accuracy by remember{mutableStateOf<Float?>(null)}
+  var collecting by remember{mutableStateOf(false)}
+  var progress by remember{mutableStateOf(0)}
+  var samples by remember{mutableStateOf(listOf<Location>())}
+  var serverUrl by remember{mutableStateOf("https://rochester-acting-hundred-iron.trycloudflare.com")}
+  var connected by remember{mutableStateOf(false)}
+  var testing by remember{mutableStateOf(false)}
+  var clients by remember{mutableStateOf(listOf<ServerClient>())}
+
+  fun startCapture(){
+   if(closed||collecting)return
+   if(!hasPermission()){permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION));return}
+   samples=emptyList();progress=0;collecting=true;status="GPS örnekleri toplanıyor..."
+  }
+
+  LaunchedEffect(Unit){
+   while(true){
+    connected=heartbeat(serverUrl)
+    val clientsText=getText("${serverUrl.trimEnd('/')}/api/clients")
+    if(clientsText!=null){
+     try{
+      val root=JSONObject(clientsText)
+      val arr=root.optJSONArray("clients")
+      val list=mutableListOf<ServerClient>()
+      if(arr!=null){
+       for(i in 0 until arr.length()){
+        val o=arr.getJSONObject(i)
+        list.add(ServerClient(o.optString("device_id"),o.optString("ip"),o.optString("device_name"),o.optDouble("last_seen_seconds")))
+       }
+      }
+      clients=list
+     }catch(_:Exception){ }
+    }
+    delay(5000)
+   }
+  }
+
+  LaunchedEffect(collecting){
+   if(!collecting)return@LaunchedEffect
+   sampleCallback={location->accuracy=location.accuracy;samples=samples+location}
+   repeat(20){index->
+    readLocation{location->sampleCallback?.invoke(location)}
+    progress=index+1
+    delay(1000)
+   }
+   val good=samples.filter{it.hasAccuracy()}.sortedBy{it.accuracy}
+   if(good.isNotEmpty()){
+    val best=good.take(min(5,good.size))
+    val point=SurveyPoint(points.size+1,best.map{it.latitude}.average(),best.map{it.longitude}.average(),best.map{if(it.hasAltitude())it.altitude else 0.0}.average(),best.map{it.accuracy.toDouble()}.average().toFloat(),System.currentTimeMillis())
+    points=points+point
+    accuracy=point.accuracy
+    val warning=if(point.accuracy>10f)" — zayıf GPS sinyali" else ""
+    status="P${point.id} kaydedildi — ±${"%.1f".format(point.accuracy)} m$warning"
+    val body=JSONObject().apply{put("id",point.id);put("latitude",point.latitude);put("longitude",point.longitude);put("altitude",point.altitude);put("accuracy",point.accuracy);put("time",point.time);put("device_id",clientId);put("device_name",deviceName)}
+    connected=postJson("${serverUrl.trimEnd('/')}/api/point",body.toString())
+    if(!connected)status+=" — PC bağlantısı yok"
+   }else status="Geçerli GPS örneği alınamadı"
+   collecting=false
+   sampleCallback=null
+  }
+
+  LaunchedEffect(testing){
+   if(testing){
+    connected=getOk("${serverUrl.trimEnd('/')}/api/state")
+    status=if(connected)"PC bağlantısı başarılı" else "PC bağlantısı başarısız"
+    testing=false
+   }
+  }
+
+  LaunchedEffect(closed){
+   if(closed){
+    val ok=postJson("${serverUrl.trimEnd('/')}/api/polygon/close","{}")
+    status=if(ok)"Polygon kapatıldı" else "Polygon kapatıldı — PC bağlantısı yok"
+   }
+  }
+
+  Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
+   Text("GPS Grid",style=MaterialTheme.typography.headlineMedium)
+   Text(status)
+   Text("Accuracy: ${accuracy?.let{"%.1f m".format(it)}?:"—"} • Nokta: ${points.size}")
+   OutlinedTextField(value=serverUrl,onValueChange={serverUrl=it},modifier=Modifier.fillMaxWidth(),singleLine=true,label={Text("PC Server adresi")})
+   Button(onClick={if(!testing){testing=true;status="PC bağlantısı test ediliyor..."}},modifier=Modifier.fillMaxWidth(),enabled=!testing){Text(if(connected)"PC BAĞLI" else "PC BAĞLANTISINI TEST ET")}
+   Card(Modifier.fillMaxWidth()){
+    Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(4.dp)){
+     Text("Servera bağlı cihazlar (${clients.size})",style=MaterialTheme.typography.titleMedium)
+     if(clients.isEmpty())Text("Bağlı cihaz yok")
+     else clients.forEach{c->Text("● ${c.deviceName} • ${c.ip} • ${"%.0f".format(c.lastSeen)} sn önce")}
+    }
+   }
+   SurveyCanvas(points,closed,Modifier.fillMaxWidth().height(220.dp))
+   if(collecting){LinearProgressIndicator(progress={progress/20f},Modifier.fillMaxWidth());Text("$progress / 20 ölçüm")}
+   Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+    Button(onClick={startCapture()},Modifier.weight(1f),enabled=!closed&&!collecting){Text("NOKTA EKLE")}
+    Button(onClick={closed=true},Modifier.weight(1f),enabled=!closed&&points.size>=3&&!collecting){Text("POLİGONU KAPAT")}
+   }
+   if(closed)Card(Modifier.fillMaxWidth()){Column(Modifier.padding(12.dp)){Text("POLYGON HAZIR");Text("Alan: ${formatArea(polygonArea(points))}");Text("Çevre: ${formatDistance(polygonPerimeter(points))}")}}
+   Text("Saha noktaları")
+   LazyColumn(Modifier.weight(1f)){items(points){point->Text("P${point.id} %.7f, %.7f ±%.1f m".format(point.latitude,point.longitude,point.accuracy))}}
+   OutlinedButton(onClick={points=points.dropLast(1);status="Son nokta silindi"},Modifier.fillMaxWidth(),enabled=points.isNotEmpty()&&!closed&&!collecting){Text("SON NOKTAYI SİL")}
+  }
  }
- @Composable private fun SurveyCanvas(points:List<SurveyPoint>,closed:Boolean,modifier:Modifier){val background=MaterialTheme.colorScheme.surfaceVariant;val line=MaterialTheme.colorScheme.primary;val dot=MaterialTheme.colorScheme.error;Box(modifier.background(background),contentAlignment=Alignment.Center){if(points.isEmpty())Text("Noktalar burada görünecek") else Canvas(Modifier.fillMaxSize().padding(20.dp)){val minLat=points.minOf{it.latitude};val maxLat=points.maxOf{it.latitude};val minLon=points.minOf{it.longitude};val maxLon=points.maxOf{it.longitude};val scale=min(size.width/max(1e-9,maxLon-minLon).toFloat(),size.height/max(1e-9,maxLat-minLat).toFloat())*.8f;val centerX=size.width/2;val centerY=size.height/2;val centerLon=(minLon+maxLon)/2;val centerLat=(minLat+maxLat)/2;val path=Path();points.forEachIndexed{index,point->val x=centerX+((point.longitude-centerLon)*scale).toFloat();val y=centerY-((point.latitude-centerLat)*scale).toFloat();if(index==0)path.moveTo(x,y)else path.lineTo(x,y)};if(closed)path.close();drawPath(path,line,style=Stroke(5f));points.forEach{point->val x=centerX+((point.longitude-centerLon)*scale).toFloat();val y=centerY-((point.latitude-centerLat)*scale).toFloat();drawCircle(dot,9f,Offset(x,y))}}}}
+
+ @Composable private fun SurveyCanvas(points:List<SurveyPoint>,closed:Boolean,modifier:Modifier){
+  val background=MaterialTheme.colorScheme.surfaceVariant
+  val line=MaterialTheme.colorScheme.primary
+  val dot=MaterialTheme.colorScheme.error
+  Box(modifier.background(background),contentAlignment=Alignment.Center){
+   if(points.isEmpty())Text("Noktalar burada görünecek") else Canvas(Modifier.fillMaxSize().padding(20.dp)){
+    val minLat=points.minOf{it.latitude};val maxLat=points.maxOf{it.latitude};val minLon=points.minOf{it.longitude};val maxLon=points.maxOf{it.longitude}
+    val scale=min(size.width/max(1e-9,maxLon-minLon).toFloat(),size.height/max(1e-9,maxLat-minLat).toFloat())*.8f
+    val centerX=size.width/2;val centerY=size.height/2;val centerLon=(minLon+maxLon)/2;val centerLat=(minLat+maxLat)/2
+    val path=Path()
+    points.forEachIndexed{index,point->{val x=centerX+((point.longitude-centerLon)*scale).toFloat();val y=centerY-((point.latitude-centerLat)*scale).toFloat();if(index==0)path.moveTo(x,y)else path.lineTo(x,y)}}
+    if(closed)path.close()
+    drawPath(path,line,style=Stroke(5f))
+    points.forEach{point->{val x=centerX+((point.longitude-centerLon)*scale).toFloat();val y=centerY-((point.latitude-centerLat)*scale).toFloat();drawCircle(dot,9f,Offset(x,y))}}
+   }
+  }
+ }
+
  private fun polygonArea(points:List<SurveyPoint>):Double{if(points.size<3)return 0.0;val r=6371008.8;val lat=Math.toRadians(points.map{it.latitude}.average());val xy=points.map{Pair(Math.toRadians(it.longitude)*r*cos(lat),Math.toRadians(it.latitude)*r)};var sum=0.0;xy.indices.forEach{i->val j=(i+1)%xy.size;sum+=xy[i].first*xy[j].second-xy[j].first*xy[i].second};return abs(sum)/2}
  private fun polygonPerimeter(points:List<SurveyPoint>):Double{if(points.size<2)return 0.0;var sum=0.0;for(i in 1 until points.size)sum+=distance(points[i-1],points[i]);sum+=distance(points.last(),points.first());return sum}
  private fun distance(a:SurveyPoint,b:SurveyPoint):Double{val r=6371008.8;val p1=Math.toRadians(a.latitude);val p2=Math.toRadians(b.latitude);val dp=Math.toRadians(b.latitude-a.latitude);val dl=Math.toRadians(b.longitude-a.longitude);val h=sin(dp/2).pow(2)+cos(p1)*cos(p2)*sin(dl/2).pow(2);return 2*r*asin(sqrt(h))}
