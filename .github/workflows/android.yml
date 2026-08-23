@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "feature/multi-gnss-quality" ]
   workflow_dispatch:
 
 jobs:
