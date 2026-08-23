@@ -59,6 +59,10 @@ def get_clients():
 def heartbeat():
     return jsonify(ok=True, client=touch_client())
 
+@app.post('/api/heartbeat')
+def heartbeat_post():
+    return jsonify(ok=True, client=touch_client())
+
 @app.post('/api/point')
 def add_point():
     p = request.get_json(force=True)
