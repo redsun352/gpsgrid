@@ -39,9 +39,9 @@ class MainActivity:ComponentActivity(){
  private val permissionLauncher=registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()){if(it[Manifest.permission.ACCESS_FINE_LOCATION]==true)readLocation{sampleCallback?.invoke(it)}}
  override fun onCreate(b:Bundle?){super.onCreate(b);setContent{MaterialTheme{GpsGrid()}}}
  private fun hasPermission()=ContextCompat.checkSelfPermission(this,Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED
- private fun readLocation(done:(Location)->Unit){if(!hasPermission())return;val token=CancellationTokenSource();fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY,token.token).addOnSuccessListener{if(it!=null)done(it)}}
- private suspend fun postJson(url:String,json:String):Boolean=withContext(Dispatchers.IO){try{val c=URL(url).openConnection() as HttpURLConnection;c.requestMethod="POST";c.connectTimeout=5000;c.readTimeout=5000;c.doOutput=true;c.setRequestProperty("Content-Type","application/json");c.outputStream.use{it.write(json.toByteArray())};c.responseCode in 200..299}catch(_:Exception){false}}
- private suspend fun getOk(url:String):Boolean=withContext(Dispatchers.IO){try{val c=URL(url).openConnection() as HttpURLConnection;c.requestMethod="GET";c.connectTimeout=5000;c.readTimeout=5000;c.responseCode in 200..299}catch(_:Exception){false}}
+ private fun readLocation(done:(Location)->Unit){if(!hasPermission())return;val token=CancellationTokenSource();fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY,token.token).addOnSuccessListener{if(it!=null&&it.hasAccuracy())done(it)}}
+ private suspend fun postJson(url:String,json:String):Boolean=withContext(Dispatchers.IO){try{val c=URL(url).openConnection() as HttpURLConnection;c.requestMethod="POST";c.connectTimeout=8000;c.readTimeout=8000;c.doOutput=true;c.setRequestProperty("Content-Type","application/json");c.outputStream.use{it.write(json.toByteArray())};c.responseCode in 200..299}catch(_:Exception){false}}
+ private suspend fun getOk(url:String):Boolean=withContext(Dispatchers.IO){try{val c=URL(url).openConnection() as HttpURLConnection;c.requestMethod="GET";c.connectTimeout=8000;c.readTimeout=8000;c.responseCode in 200..299}catch(_:Exception){false}}
  @Composable private fun GpsGrid(){
   var points by remember{mutableStateOf(listOf<SurveyPoint>())}
   var closed by remember{mutableStateOf(false)}
@@ -50,7 +50,7 @@ class MainActivity:ComponentActivity(){
   var collecting by remember{mutableStateOf(false)}
   var progress by remember{mutableStateOf(0)}
   var samples by remember{mutableStateOf(listOf<Location>())}
-  var serverUrl by remember{mutableStateOf("http://192.168.1.100:8765")}
+  var serverUrl by remember{mutableStateOf("https://rochester-acting-hundred-iron.trycloudflare.com")}
   var connected by remember{mutableStateOf(false)}
   var testing by remember{mutableStateOf(false)}
 
@@ -63,24 +63,26 @@ class MainActivity:ComponentActivity(){
   LaunchedEffect(collecting){
    if(!collecting)return@LaunchedEffect
    sampleCallback={location->accuracy=location.accuracy;samples=samples+location}
-   repeat(30){index->
+   repeat(20){index->
     readLocation{location->sampleCallback?.invoke(location)}
     progress=index+1
     delay(1000)
    }
-   val good=samples.filter{it.hasAccuracy()}
+   val good=samples.filter{it.hasAccuracy()}.sortedBy{it.accuracy}
    if(good.isNotEmpty()){
+    val best=good.take(min(5,good.size))
     val point=SurveyPoint(
      points.size+1,
-     good.map{it.latitude}.average(),
-     good.map{it.longitude}.average(),
-     good.map{if(it.hasAltitude())it.altitude else 0.0}.average(),
-     good.map{it.accuracy.toDouble()}.average().toFloat(),
+     best.map{it.latitude}.average(),
+     best.map{it.longitude}.average(),
+     best.map{if(it.hasAltitude())it.altitude else 0.0}.average(),
+     best.map{it.accuracy.toDouble()}.average().toFloat(),
      System.currentTimeMillis()
     )
     points=points+point
     accuracy=point.accuracy
-    status="P${point.id} kaydedildi — ±${"%.1f".format(point.accuracy)} m"
+    val warning=if(point.accuracy>10f)" — zayıf GPS sinyali" else ""
+    status="P${point.id} kaydedildi — ±${"%.1f".format(point.accuracy)} m$warning"
     val body=JSONObject().apply{
      put("id",point.id);put("latitude",point.latitude);put("longitude",point.longitude)
      put("altitude",point.altitude);put("accuracy",point.accuracy);put("time",point.time)
@@ -100,6 +102,13 @@ class MainActivity:ComponentActivity(){
    }
   }
 
+  LaunchedEffect(closed){
+   if(closed){
+    val ok=postJson("${serverUrl.trimEnd('/')}/api/polygon/close","{}")
+    status=if(ok)"Polygon kapatıldı" else "Polygon kapatıldı — PC bağlantısı yok"
+   }
+  }
+
   Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
    Text("GPS Grid",style=MaterialTheme.typography.headlineMedium)
    Text(status)
@@ -107,10 +116,10 @@ class MainActivity:ComponentActivity(){
    OutlinedTextField(value=serverUrl,onValueChange={serverUrl=it},modifier=Modifier.fillMaxWidth(),singleLine=true,label={Text("PC Server adresi")})
    Button(onClick={if(!testing){testing=true;status="PC bağlantısı test ediliyor..."}},modifier=Modifier.fillMaxWidth(),enabled=!testing){Text(if(connected)"PC BAĞLI" else "PC BAĞLANTISINI TEST ET")}
    SurveyCanvas(points,closed,Modifier.fillMaxWidth().height(260.dp))
-   if(collecting){LinearProgressIndicator(progress={progress/30f},Modifier.fillMaxWidth());Text("$progress / 30 ölçüm")}
+   if(collecting){LinearProgressIndicator(progress={progress/20f},Modifier.fillMaxWidth());Text("$progress / 20 ölçüm")}
    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
     Button(onClick={startCapture()},Modifier.weight(1f),enabled=!closed&&!collecting){Text("NOKTA EKLE")}
-    Button(onClick={closed=true;status="Polygon kapatıldı"},Modifier.weight(1f),enabled=!closed&&points.size>=3&&!collecting){Text("POLİGONU KAPAT")}
+    Button(onClick={closed=true},Modifier.weight(1f),enabled=!closed&&points.size>=3&&!collecting){Text("POLİGONU KAPAT")}
    }
    if(closed)Card(Modifier.fillMaxWidth()){Column(Modifier.padding(12.dp)){Text("POLYGON HAZIR");Text("Alan: ${formatArea(polygonArea(points))}");Text("Çevre: ${formatDistance(polygonPerimeter(points))}")}}
    Text("Saha noktaları")
@@ -124,29 +133,16 @@ class MainActivity:ComponentActivity(){
   val line=MaterialTheme.colorScheme.primary
   val dot=MaterialTheme.colorScheme.error
   Box(modifier.background(background),contentAlignment=Alignment.Center){
-   if(points.isEmpty()){
-    Text("Noktalar burada görünecek")
-   }else{
-    Canvas(Modifier.fillMaxSize().padding(20.dp)){
-     val minLat=points.minOf{it.latitude};val maxLat=points.maxOf{it.latitude}
-     val minLon=points.minOf{it.longitude};val maxLon=points.maxOf{it.longitude}
-     val scale=min(size.width/max(1e-9,maxLon-minLon).toFloat(),size.height/max(1e-9,maxLat-minLat).toFloat())*.8f
-     val centerX=size.width/2;val centerY=size.height/2
-     val centerLon=(minLon+maxLon)/2;val centerLat=(minLat+maxLat)/2
-     val path=Path()
-     points.forEachIndexed{index,point->
-      val x=centerX+((point.longitude-centerLon)*scale).toFloat()
-      val y=centerY-((point.latitude-centerLat)*scale).toFloat()
-      if(index==0)path.moveTo(x,y)else path.lineTo(x,y)
-     }
-     if(closed)path.close()
-     drawPath(path,line,style=Stroke(5f))
-     points.forEach{point->
-      val x=centerX+((point.longitude-centerLon)*scale).toFloat()
-      val y=centerY-((point.latitude-centerLat)*scale).toFloat()
-      drawCircle(dot,9f,Offset(x,y))
-     }
-    }
+   if(points.isEmpty()) Text("Noktalar burada görünecek") else Canvas(Modifier.fillMaxSize().padding(20.dp)){
+    val minLat=points.minOf{it.latitude};val maxLat=points.maxOf{it.latitude}
+    val minLon=points.minOf{it.longitude};val maxLon=points.maxOf{it.longitude}
+    val scale=min(size.width/max(1e-9,maxLon-minLon).toFloat(),size.height/max(1e-9,maxLat-minLat).toFloat())*.8f
+    val centerX=size.width/2;val centerY=size.height/2
+    val centerLon=(minLon+maxLon)/2;val centerLat=(minLat+maxLat)/2
+    val path=Path()
+    points.forEachIndexed{index,point->val x=centerX+((point.longitude-centerLon)*scale).toFloat();val y=centerY-((point.latitude-centerLat)*scale).toFloat();if(index==0)path.moveTo(x,y)else path.lineTo(x,y)}
+    if(closed)path.close();drawPath(path,line,style=Stroke(5f))
+    points.forEach{point->val x=centerX+((point.longitude-centerLon)*scale).toFloat();val y=centerY-((point.latitude-centerLat)*scale).toFloat();drawCircle(dot,9f,Offset(x,y))}
    }
   }
  }
